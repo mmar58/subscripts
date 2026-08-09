@@ -67,6 +67,22 @@ function formatBytes(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
+// Helper to format time (in seconds) into a readable string
+function formatTime(seconds) {
+    if (!isFinite(seconds) || seconds <= 0)
+        return '-';
+    seconds = Math.floor(seconds);
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 24)
+        return `${Math.floor(h / 24)}d ${h % 24}h`;
+    if (h > 0)
+        return `${h}h ${m}m`;
+    if (m > 0)
+        return `${m}m ${s}s`;
+    return `${s}s`;
+}
 // Make JSON-RPC request to aria2c
 async function callAria2(method, params = []) {
     const payload = {
@@ -143,10 +159,11 @@ async function generateReport() {
     console.log('\x1b[36m========================================================================================\x1b[0m');
     console.log('\x1b[1m\x1b[33m                          ARIA2C DOWNLOADS & STORAGE REPORT                            \x1b[0m');
     console.log('\x1b[36m========================================================================================\x1b[0m\n');
-    const [active, waiting, stopped] = await Promise.all([
+    const [active, waiting, stopped, globalStat] = await Promise.all([
         callAria2('tellActive'),
         callAria2('tellWaiting', [0, 100]),
-        callAria2('tellStopped', [0, 100])
+        callAria2('tellStopped', [0, 100]),
+        callAria2('getGlobalStat')
     ]);
     const allDownloads = [...active, ...waiting, ...stopped];
     if (allDownloads.length === 0) {
@@ -155,6 +172,7 @@ async function generateReport() {
     }
     const trackedDrives = new Set();
     const pendingBytesByRoot = new Map();
+    const speedBytesByRoot = new Map();
     const tableData = [];
     const newSizeCache = {};
     let cacheModified = false;
@@ -210,10 +228,13 @@ async function generateReport() {
             process.stdout.write(`\r\x1b[K\x1b[36m[Processing ${i + 1}/${allDownloads.length}]\x1b[0m ${fileName}`);
         }
         const remainingBytes = Math.max(0, totalBytes - completedBytes);
+        const downloadSpeed = Number(dl.downloadSpeed) || 0;
         if (fileDir !== 'Unknown') {
             const rootDrive = path.parse(path.resolve(fileDir)).root.toUpperCase();
             const currentPending = pendingBytesByRoot.get(rootDrive) || 0;
             pendingBytesByRoot.set(rootDrive, currentPending + remainingBytes);
+            const currentSpeed = speedBytesByRoot.get(rootDrive) || 0;
+            speedBytesByRoot.set(rootDrive, currentSpeed + downloadSpeed);
         }
         let statusFormatted = dl.status.toUpperCase();
         if (dl.status === 'active')
@@ -231,16 +252,30 @@ async function generateReport() {
         else if (totalBytes > 0 && dl.totalLength === '0') {
             progressString += ` \x1b[33m(Estim.)\x1b[0m`; // Flag sizes fetched via HTTP HEAD
         }
+        let speedStr = '-';
+        let etaStr = '-';
+        if (dl.status === 'active') {
+            speedStr = `${formatBytes(downloadSpeed)}/s`;
+            if (downloadSpeed > 0 && totalBytes > completedBytes) {
+                etaStr = formatTime(remainingBytes / downloadSpeed);
+            }
+            else if (downloadSpeed === 0 && totalBytes > completedBytes) {
+                etaStr = '∞';
+            }
+        }
         tableData.push({
             Name: fileName.length > 35 ? fileName.substring(0, 32) + '...' : fileName,
             Status: statusFormatted,
             Progress: progressString,
+            Speed: speedStr,
+            ETA: etaStr,
             'Save Location': fileDir
         });
     }
     // Clear the dynamic logging line entirely before printing the tables
     process.stdout.write('\r\x1b[K');
-    console.log('\x1b[1m\x1b[34m--- ACTIVE & RECENT DOWNLOADS ---\x1b[0m');
+    const globalDlSpeed = Number(globalStat.downloadSpeed) || 0;
+    console.log(`\x1b[1m\x1b[34m--- ACTIVE & RECENT DOWNLOADS ---\x1b[0m  |  Total Speed: \x1b[32m${formatBytes(globalDlSpeed)}/s\x1b[0m`);
     console.table(tableData);
     console.log('\n\x1b[1m\x1b[34m--- DRIVE STORAGE ANALYSIS (POST-DOWNLOAD ESTIMATE) ---\x1b[0m');
     const uniqueRoots = new Map();
@@ -257,13 +292,24 @@ async function generateReport() {
     });
     const storageTable = [];
     uniqueRoots.forEach((info) => {
+        const rootDrive = info.root;
+        const pendingForDrive = pendingBytesByRoot.get(rootDrive) || 0;
+        const speedForDrive = speedBytesByRoot.get(rootDrive) || 0;
+        let etaStr = '-';
+        if (speedForDrive > 0 && pendingForDrive > 0) {
+            etaStr = formatTime(pendingForDrive / speedForDrive);
+        }
+        else if (speedForDrive === 0 && pendingForDrive > 0) {
+            etaStr = '∞';
+        }
         storageTable.push({
             'Drive Root': info.root,
             'Total Cap.': info.total,
             'Current Free': info.currentFree,
             'Incoming Data': info.pendingAllocation,
             'Est. Free After DL': info.estimatedFree,
-            'Est. Free %': info.estimatedFreePercent
+            'Est. Free %': info.estimatedFreePercent,
+            'ETA': etaStr
         });
     });
     if (storageTable.length > 0) {
