@@ -43,7 +43,7 @@ async function generateReport() {
 
     const newSizeCache: Record<string, number> = {};
     let cacheModified = false;
-
+    let totalRemainingDownload = 0;
     // Process downloads sequentially to allow dynamic terminal logging
     for (let i = 0; i < allDownloads.length; i++) {
         const dl = allDownloads[i];
@@ -99,6 +99,8 @@ async function generateReport() {
 
         const remainingBytes = Math.max(0, totalBytes - completedBytes);
         const downloadSpeed = Number(dl.downloadSpeed) || 0;
+        // Calculating total amounts
+        totalRemainingDownload += remainingBytes;
 
         if (fileDir !== 'Unknown') {
             const rootDrive = path.parse(path.resolve(fileDir)).root.toUpperCase();
@@ -149,7 +151,11 @@ async function generateReport() {
     const globalDlSpeed = Number(globalStat.downloadSpeed) || 0;
     console.log(`\x1b[1m\x1b[34m--- ACTIVE & RECENT DOWNLOADS ---\x1b[0m  |  Total Speed: \x1b[32m${formatBytes(globalDlSpeed)}/s\x1b[0m`);
     printTable(tableData);
-
+    // Reporting total dl speed and remaining data
+    if (totalRemainingDownload > 0) {
+        console.log(`Total download ${formatBytes(totalRemainingDownload)} remains.`);
+        console.log(`Will be downloaded in ${formatTime(totalRemainingDownload / globalDlSpeed)} with speed ${formatBytes(globalDlSpeed)}/s.`);
+    }
     console.log('\n\x1b[1m\x1b[34m--- DRIVE STORAGE ANALYSIS (POST-DOWNLOAD ESTIMATE) ---\x1b[0m');
 
     const uniqueRoots = new Map<string, any>();
