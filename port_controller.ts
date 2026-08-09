@@ -1,13 +1,13 @@
-const { exec } = require('child_process');
-const os = require('os');
+import { exec } from 'child_process';
+import os from 'os';
+
 const platform = os.platform();
 
 /**
  * Find the process using a specific port
- * @param {number} port
- * @returns {Promise<{pid: string, info: string}>}
+ * @param port
  */
-function findProcessByPort(port) {
+function findProcessByPort(port: string | number): Promise<{ pid: string, info: string }> {
     return new Promise((resolve, reject) => {
         if (platform === 'win32') {
             // netstat -ano | findstr :<port>
@@ -45,15 +45,14 @@ function findProcessByPort(port) {
 
 /**
  * Get detailed process information by PID
- * @param {string} pid
- * @returns {Promise<{pid: string, name: string, memory: string, cpu: string, ports: string[], commandLine: string}>}
+ * @param pid
  */
-function getProcessInfoByPID(pid) {
+function getProcessInfoByPID(pid: string): Promise<{ pid: string, name: string, memory: string, cpu: string, ports: string[], commandLine: string, status: string }> {
     return new Promise(async (resolve, reject) => {
         try {
             if (platform === 'win32') {
                 // Get basic process info
-                const basicInfo = await new Promise((res, rej) => {
+                const basicInfo = await new Promise<any>((res, rej) => {
                     exec(`tasklist /FI "PID eq ${pid}" /FO CSV /V`, (err, stdout) => {
                         if (err || !stdout) return rej('Process not found');
                         const lines = stdout.trim().split('\n');
@@ -71,10 +70,10 @@ function getProcessInfoByPID(pid) {
                 });
 
                 // Get ports used by this process
-                const ports = await new Promise((res) => {
+                const ports = await new Promise<string[]>((res) => {
                     exec(`netstat -ano | findstr ${pid}`, (err, stdout) => {
                         if (err || !stdout) return res([]);
-                        const portList = [];
+                        const portList: string[] = [];
                         const lines = stdout.trim().split('\n');
                         for (const line of lines) {
                             const match = line.match(/:([0-9]+)/);
@@ -87,7 +86,7 @@ function getProcessInfoByPID(pid) {
                 resolve({ ...basicInfo, ports });
             } else {
                 // Get basic process info on Unix
-                const basicInfo = await new Promise((res, rej) => {
+                const basicInfo = await new Promise<any>((res, rej) => {
                     exec(`ps -p ${pid} -o comm,pmem,stat,pcpu,args`, (err, stdout) => {
                         if (err || !stdout) return rej('Process not found');
                         const lines = stdout.trim().split('\n');
@@ -111,10 +110,10 @@ function getProcessInfoByPID(pid) {
                 });
 
                 // Get ports used by this process on Unix
-                const ports = await new Promise((res) => {
+                const ports = await new Promise<string[]>((res) => {
                     exec(`lsof -a -p ${pid} -i -P -n`, (err, stdout) => {
                         if (err || !stdout) return res([]);
-                        const portList = [];
+                        const portList: string[] = [];
                         const lines = stdout.trim().split('\n');
                         for (let i = 1; i < lines.length; i++) {
                             const line = lines[i];
@@ -135,10 +134,9 @@ function getProcessInfoByPID(pid) {
 
 /**
  * Kill a process by PID
- * @param {string} pid
- * @returns {Promise<string>}
+ * @param pid
  */
-function killProcess(pid) {
+function killProcess(pid: string): Promise<string> {
     return new Promise((resolve, reject) => {
         if (platform === 'win32') {
             exec(`taskkill /PID ${pid} /F`, (err, stdout, stderr) => {
@@ -163,8 +161,8 @@ async function main() {
     
     if (!value) {
         console.log('Usage:');
-        console.log('  node app.js <port> [--kill]           - Find process by port');
-        console.log('  node app.js <pid> --pid [--kill]      - Get process info by PID');
+        console.log('  tsx port_controller.ts <port> [--kill]           - Find process by port');
+        console.log('  tsx port_controller.ts <pid> --pid [--kill]      - Get process info by PID');
         return;
     }
     
