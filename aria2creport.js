@@ -2,11 +2,58 @@ const fs = require('fs');
 const path = require('path');
 
 // ==========================================
+// Environment & Arguments Parsing
+// ==========================================
+const ENV_FILE = path.join(__dirname, '.env');
+if (fs.existsSync(ENV_FILE)) {
+    const envData = fs.readFileSync(ENV_FILE, 'utf8');
+    envData.split('\n').forEach(line => {
+        const match = line.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+        if (match) {
+            const key = match[1];
+            let value = match[2] || '';
+            if (value.length > 0 && value.charAt(0) === '"' && value.charAt(value.length - 1) === '"') {
+                value = value.replace(/\\n/gm, '\n');
+            }
+            value = value.replace(/(^['"]|['"]$)/g, '').trim();
+            if (!process.env[key]) {
+                process.env[key] = value;
+            }
+        }
+    });
+}
+
+const argv = process.argv.slice(2);
+let argsRpcUrl = null;
+let argsRpcSecret = null;
+for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--rpc-url' && argv[i + 1]) {
+        argsRpcUrl = argv[++i];
+    } else if (argv[i].startsWith('--rpc-url=')) {
+        argsRpcUrl = argv[i].substring('--rpc-url='.length);
+    } else if (argv[i] === '--rpc-secret' && argv[i + 1]) {
+        argsRpcSecret = argv[++i];
+    } else if (argv[i].startsWith('--rpc-secret=')) {
+        argsRpcSecret = argv[i].substring('--rpc-secret='.length);
+    }
+}
+
+// ==========================================
 // Configuration
 // ==========================================
-const RPC_URL = 'http://localhost:6800/jsonrpc';
-const RPC_SECRET = 'mmarWinPc582c';
+const RPC_URL = argsRpcUrl || process.env.RPC_URL || 'http://localhost:6800/jsonrpc';
+const RPC_SECRET = argsRpcSecret || process.env.RPC_SECRET || 'mmarWinPc582c';
 const USER_AGENT = 'Transmission/2.94'; // Matches your aria2c config
+
+const CACHE_FILE = path.join(__dirname, 'link_sizes.json');
+let sizeCache = {};
+if (fs.existsSync(CACHE_FILE)) {
+    try {
+        sizeCache = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    } catch (e) {
+        sizeCache = {};
+    }
+}
 
 // Helper to format raw bytes into human-readable strings
 function formatBytes(bytes) {
@@ -116,6 +163,9 @@ async function generateReport() {
     const pendingBytesByRoot = new Map();
     const tableData = [];
 
+    const newSizeCache = {};
+    let cacheModified = false;
+
     // Process downloads sequentially to allow dynamic terminal logging
     for (let i = 0; i < allDownloads.length; i++) {
         const dl = allDownloads[i];
@@ -149,12 +199,20 @@ async function generateReport() {
 
         // --- DYNAMIC TERMINAL LOGGING & SIZE FETCHING ---
         if (totalBytes === 0 && sourceUrl && dl.status !== 'complete') {
-            // \r returns cursor to start of line, \x1b[K clears the line
-            process.stdout.write(`\r\x1b[K\x1b[33m[Analyzing ${i + 1}/${allDownloads.length}]\x1b[0m Fetching remote size for: ${fileName}`);
+            if (sizeCache[sourceUrl]) {
+                totalBytes = sizeCache[sourceUrl];
+                newSizeCache[sourceUrl] = totalBytes;
+                process.stdout.write(`\r\x1b[K\x1b[36m[Processing ${i + 1}/${allDownloads.length}]\x1b[0m ${fileName}`);
+            } else {
+                // \r returns cursor to start of line, \x1b[K clears the line
+                process.stdout.write(`\r\x1b[K\x1b[33m[Analyzing ${i + 1}/${allDownloads.length}]\x1b[0m Fetching remote size for: ${fileName}`);
 
-            const fetchedSize = await fetchSizeFromUrl(sourceUrl);
-            if (fetchedSize > 0) {
-                totalBytes = fetchedSize;
+                const fetchedSize = await fetchSizeFromUrl(sourceUrl);
+                if (fetchedSize > 0) {
+                    totalBytes = fetchedSize;
+                    newSizeCache[sourceUrl] = fetchedSize;
+                    cacheModified = true;
+                }
             }
         } else {
             // Just update the processing indicator for files that already have a size
@@ -226,6 +284,14 @@ async function generateReport() {
         console.table(storageTable);
     } else {
         console.log('\x1b[90mNo valid disk paths found to analyze.\x1b[0m');
+    }
+
+    if (Object.keys(sizeCache).length !== Object.keys(newSizeCache).length || cacheModified) {
+        try {
+            fs.writeFileSync(CACHE_FILE, JSON.stringify(newSizeCache, null, 2), 'utf8');
+        } catch (err) {
+            console.error('\x1b[31mFailed to save link sizes cache.\x1b[0m');
+        }
     }
 
     console.log('\x1b[36m========================================================================================\x1b[0m\n');

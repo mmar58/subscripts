@@ -1,1 +1,4 @@
 *.bat
+*.env
+*.json
+node_modules
