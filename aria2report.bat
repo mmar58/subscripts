@@ -1,0 +1,1 @@
+node F:/Node/subScripts/dist/aria2creport.js %*

@@ -1,4 +1,3 @@
-*.bat
 *.env
-*.json
 node_modules
+link_sizes.json

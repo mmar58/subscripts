@@ -1,0 +1,1 @@
+node F:/Node/subScripts/dist/trilium_backup.js %*
