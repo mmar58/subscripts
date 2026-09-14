@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+node /home/mmar58/node/subscripts/dist/aria2creport.js "$@"
